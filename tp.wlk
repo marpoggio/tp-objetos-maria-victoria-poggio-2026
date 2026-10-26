@@ -1,3 +1,5 @@
+import error.*
+
 // ENTRADAS
 class Entradas {
     const banda
@@ -5,44 +7,50 @@ class Entradas {
     const fecha
     method fecha() = fecha
     const precioBase = 1000
-    const precioExtra = 0
 
-    method precioFinal() = precioBase + precioExtra
+    method precioFinal() = precioBase + productora.precioExtra()
 }
 
 // ASISTENTES
 class Asistentes {
-    const tipoDeAbono // objetos fan o vip
+    const tipoDeAbono
     const historialEntradas = []
     var property dineroDisponible
-    var property descuento // ??
-    
-    method agregarDescuento(cantidad) { //para poder cambiar el valor desde otras clases
-        descuento += cantidad
-    }
 
-    method puedeComprar() = (dineroDisponible > 0) //throw error? -> "deberá notificarse adecuadamente"
+    method puedeComprar() = (dineroDisponible > 0)
     method comprar(entrada) {
-        if (self.puedeComprar()) {
-            const montoPagar = entrada.precioFinal() - tipoDeAbono.porcentajeDescuento(entrada, self)
-            historialEntradas.add(entrada)
-            dineroDisponible =- montoPagar
-            const banda = entrada.banda()
-            banda.agregarEntradas(1)
+        if (!self.puedeComprar()) {
+            throw new SaldoInsuficienteException()
         }
+        const montoPagar = entrada.precioFinal() - tipoDeAbono.porcentajeDescuento(entrada.precioFinal())
+        historialEntradas.add(entrada)
+        dineroDisponible -= montoPagar
+        const banda = entrada.banda()
+        banda.agregarEntradas(1, entrada.precioFinal())
     }
-    method nombreBandas() = historialEntradas.asSet().map({ entrada => entrada.banda() })
-    const hoy = new Date()
-    method entradasAnioPasado() = historialEntradas.filter({ entrada => entrada.fecha().year() == hoy.minusYears(1) })
+    method nombreBandas() = historialEntradas.map({ entrada => entrada.banda().nombre() }).asSet()
+    method entradasAnioPasado() = historialEntradas.filter({ entrada => entrada.fecha().year() == new Date().year() - 1 })
+    
+    method bonificar() {
+        tipoDeAbono.bonificar()
+    }
 }
-object fan {
-    method porcentajeDescuento(entrada, asistente) = 0
+// concepto: polimorfismo
+class Fan {
+    method porcentajeDescuento(precio) = 0
+    method bonificar() {}
 }
-object vip {
-    method porcentajeDescuento(entrada, asistente) = entrada.precioFinal() * (asistente.descuento()) //asistente.descuento es el porcentaje de descuento particular para cada asistente, solo de los vips
-} // o clase tipo abono con estas que heredan?
+class Vip {
+    var descuento
+    method porcentajeDescuento(precio) = precio * descuento
+    method bonificar() {
+        descuento += 0.01
+    }
+}
+// son clases para que asi el descuento de cada asistente viva dentro de ellos mismos.
 
 // BANDAS
+// concepto: herencia
 class Banda {
     const nombre
     method nombre() = nombre
@@ -51,58 +59,67 @@ class Banda {
     method presupuesto() = self.canon() + self.gastoExtra()
     method popularidad()
 
-    var property cantidadEntradas
-    method agregarEntradas(cantidad) { 
+    var cantidadEntradas = 0
+    var recaudacion = 0
+    method cantidadEntradas() = cantidadEntradas
+    method recaudacion() = recaudacion
+    method agregarEntradas(cantidad, precio) { 
         cantidadEntradas += cantidad
+        recaudacion += precio * cantidad
     }
 }
 class BandaRock inherits Banda {
     const cantidadSolosGuitarra
-    method cantidadSolosGuitarra() = cantidadSolosGuitarra
 
     override method gastoExtra() = 10000
-    override method popularidad() = 100 * self.cantidadSolosGuitarra()
+    override method popularidad() = 100 * cantidadSolosGuitarra
 }
 class BandaTrap inherits Banda {
     const tieneHielo
-    method tieneHielo() = tieneHielo
 
     override method gastoExtra() = 0
     override method popularidad() {
-        if (self.tieneHielo()) {
+        if (tieneHielo) {
             return 1000
         }
         else {
             return 0
         }
     }
-    override method canon() = 1000000 * self.popularidad() //??
+    override method canon() = super() * self.popularidad()
 }
 class BandaIndie inherits Banda {
     const cantidadInstrumentos
-    method cantidadInstrumentos() = cantidadInstrumentos
 
     override method popularidad() = self.nombre().size() * 3.14
-    override method gastoExtra() = self.cantidadInstrumentos() * 500
+    override method gastoExtra() = cantidadInstrumentos * 500
 }
 
-class Productora { //revisar
-    const property listaBandas = [] // #{}? ??
-    
-    var property presupuestoTotal
-    const property presupuestoBandas = listaBandas.forEach({ banda => presupuestoTotal += banda.presupuesto()})
-    
-    var property cantidadEntradasVendidasTotales
-    const property cantidadEntradasVendidas = listaBandas.forEach({ banda => cantidadEntradasVendidasTotales += banda.cantidadEntradas() })
-    
-    method gananciaTotal(entradas) = (self.cantidadEntradasVendidasTotales() * entradas.precioFinal()) - self.presupuestoTotal()
-    method bandaMasPopular() {
-        const lista = listaBandas.sortedBy({ banda1, banda2 => banda1.cantidadEntradas() > banda2.cantidadEntradas() })
-        return lista.first()
+//concepto: well known object
+object productora { 
+    const listaBandas = []
+    const listaAsistentes = []
+    // concepto: encapsulamiento
+    method agregarBanda(banda) {
+        listaBandas.add(banda)
     }
-    method bonificarAsistentesVip(asistente) {
-        if (asistente.tipoDeAbono() == "vip") { // ?
-            asistente.agregarDescuento(0.01)
-        }
+    method agregarAsistente(asistente) {
+        listaAsistentes.add(asistente)
+    }
+    var property precioExtra = 10 //numero ejemplo.
+    //aunque en el codigo no hay nada que cambia el precioExtra en si, por el "podría variar" me decidi por dejarlo en var en vez de const.
+    
+    //concepto (tambien en banda) : delegacion
+    method presupuestoTotal() = listaBandas.sum({ banda => banda.presupuesto() })
+    method ganancia() = listaBandas.sum({ banda => banda.recaudacion() })
+    method gananciaTotal() = self.ganancia() - self.presupuestoTotal()
+
+    method cantidadEntradasVendidas() = listaBandas.sum({ banda => banda.cantidadEntradas() })
+    
+    method bandaMasPopular() = listaBandas.max({ banda => banda.cantidadEntradas() })
+    // max en vez de sortedBy() + first(), porque obtiene el mismo resultado sin ordenar toda la lista.
+    method bonificarAsistentesVip() {
+        listaAsistentes.forEach({ asistente => asistente.bonificar() })
     }
 }
+//la justificacion esta en el otro md: "justificaciones.md"
